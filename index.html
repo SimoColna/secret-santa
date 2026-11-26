@@ -194,7 +194,7 @@
     var prev = getOpened();
     if (prev === null || prev === undefined || isNaN(prev) || prev === i) return openReveal(i);
     ask('Hai già fatto l\'estrazione',
-        'Da questo dispositivo hai già aperto il nome di ' + data.n[prev] + '. Aprirne un altro è sleale e verrà inviata una notifica di avviso a SimoColna (l\'organizzatore).',
+        'Da questo dispositivo hai già aperto il nome di ' + data.n[prev] + '. Aprirne un altro è sleale e verrà inviata una notifica di avviso a SimoColna.',
         'Voglio procedere comunque',
         function () {
           ask('Sicuro sicuro?',
