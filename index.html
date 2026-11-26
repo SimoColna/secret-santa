@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secret Santa</title>
+<style>
+  :root { --bg:#0f1b14; --card:#17271d; --fg:#f4efe6; --mut:#9db3a4; --acc:#d94a3d; --acc2:#e8b04a; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--fg);
+         font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         display:flex; justify-content:center; padding:24px 16px; }
+  main { width:100%; max-width:480px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; }
+  .card { background:var(--card); border-radius:16px; padding:18px; margin-bottom:16px; }
+  textarea { width:100%; min-height:200px; border-radius:10px; border:1px solid #2c4535;
+             background:#0f1b14; color:var(--fg); padding:12px; font:inherit; resize:vertical; }
+  button { font:inherit; border:0; border-radius:12px; padding:14px 16px; cursor:pointer;
+           background:var(--acc); color:#fff; width:100%; font-weight:600; }
+  button.sec { background:#25402f; color:var(--fg); }
+  button.name { background:#25402f; margin-bottom:8px; text-align:left; font-weight:500; }
+  button:active { transform:scale(.98); }
+  .row { display:flex; gap:8px; }
+  .row button { width:auto; flex:1; }
+  .hint { color:var(--mut); font-size:.9rem; margin-top:8px; }
+  .result { text-align:center; padding:28px 12px; }
+  .result .who { font-size:2rem; font-weight:800; color:var(--acc2); margin:10px 0; word-break:break-word; }
+  .hidden { display:none; }
+  input.link { width:100%; padding:10px; border-radius:10px; border:1px solid #2c4535;
+               background:#0f1b14; color:var(--fg); font:inherit; font-size:.8rem; }
+  .err { color:#ff9a8f; margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🎅 Secret Santa</h1>
+  <p class="sub" id="sub"></p>
+
+  <!-- SETUP -->
+  <section id="setup" class="hidden">
+    <div class="card">
+      <label for="names"><b>Nomi dei partecipanti</b> (uno per riga)</label>
+      <textarea id="names" placeholder="Mario&#10;Luca&#10;Giulia&#10;..."></textarea>
+      <div class="err" id="err"></div>
+      <div style="height:12px"></div>
+      <button id="draw">Avvia il draft</button>
+    </div>
+    <div class="card">
+      <label for="code"><b>Hai già un codice o un link?</b></label>
+      <input class="link" id="code" placeholder="Incolla qui il codice o il link" style="margin:8px 0">
+      <button id="usecode" class="sec">Apri</button>
+    </div>
+  </section>
+
+  <!-- LINK -->
+  <section id="share" class="hidden">
+    <div class="card">
+      <p style="margin-top:0"><b>Estrazione fatta.</b> <span id="sharemsg"></span></p>
+      <input class="link" id="link" readonly>
+      <div style="height:10px"></div>
+      <div class="row">
+        <button id="copy">Copia link</button>
+        <button id="send" class="sec">Condividi</button>
+      </div>
+      <div style="height:8px"></div>
+      <button id="mine" class="sec">Apri il mio (partecipo anch'io)</button>
+      <p class="hint">Il link contiene l'estrazione: non aprire la pagina di altri e non rifare l'estrazione, altrimenti cambia tutto.</p>
+    </div>
+  </section>
+
+  <!-- PICK NAME -->
+  <section id="pick" class="hidden">
+    <div class="card">
+      <p style="margin-top:0"><b>Chi sei?</b></p>
+      <div id="list"></div>
+    </div>
+  </section>
+
+  <!-- REVEAL -->
+  <section id="reveal" class="hidden">
+    <div class="card result">
+      <div id="hello"></div>
+      <div id="hiddenmsg" class="hint">Assicurati che nessuno stia guardando lo schermo.</div>
+      <div id="out" class="hidden">
+        <div class="hint">Devi fare il regalo a</div>
+        <div class="who" id="target"></div>
+      </div>
+      <div style="height:16px"></div>
+      <button id="show">Mostra</button>
+      <div style="height:8px"></div>
+      <button id="back" class="sec">Indietro</button>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var sections = ['setup', 'share', 'pick', 'reveal'];
+  function show(which) {
+    sections.forEach(function (s) { $(s).classList.toggle('hidden', s !== which); });
+  }
+
+  // --- encoding: {n: [names], p: [target index for each i]} -> base64url in the hash
+  function enc(obj) {
+    var bytes = new TextEncoder().encode(JSON.stringify(obj));
+    var bin = ''; bytes.forEach(function (b) { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function dec(str) {
+    str = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (str.length % 4) str += '=';
+    var bin = atob(str), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  }
+
+  // --- Sattolo's algorithm: a single cycle, so nobody draws themselves
+  // and nobody gets a 2-person swap (A<->B)
+  function singleCycle(n) {
+    var a = []; for (var i = 0; i < n; i++) a.push(i);
+    var cr = window.crypto || window.msCrypto;
+    for (var i = n - 1; i > 0; i--) {
+      var buf = new Uint32Array(1); cr.getRandomValues(buf);
+      var j = buf[0] % i; // 0..i-1, excludes i
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    // a is a cyclic permutation: person k gives to a[k]
+    return a;
+  }
+
+  var base = location.href.split('#')[0];
+  var hosted = /^(https?|file):/.test(base);
+  var data = null;
+
+  function route() {
+    var h = location.hash.replace(/^#/, '');
+    if (!h) {
+      $('sub').textContent = 'Inserisci i nomi e avvia il draft.';
+      show('setup');
+      return;
+    }
+    try { data = dec(h); } catch (e) { data = null; }
+    if (!data || !data.n || !data.p) {
+      $('sub').textContent = 'Link non valido.';
+      show('setup');
+      return;
+    }
+    $('sub').textContent = 'Tocca il tuo nome per scoprire a chi fai il regalo.';
+    var list = $('list'); list.innerHTML = '';
+    data.n.forEach(function (name, i) {
+      var b = document.createElement('button');
+      b.className = 'name'; b.textContent = name;
+      b.onclick = function () { openReveal(i); };
+      list.appendChild(b);
+    });
+    show('pick');
+  }
+
+  function openReveal(i) {
+    $('hello').innerHTML = '<b></b>';
+    $('hello').firstChild.textContent = 'Ciao ' + data.n[i] + '!';
+    $('target').textContent = data.n[data.p[i]];
+    $('out').classList.add('hidden');
+    $('hiddenmsg').classList.remove('hidden');
+    $('show').classList.remove('hidden');
+    show('reveal');
+  }
+  $('show').onclick = function () {
+    $('out').classList.remove('hidden');
+    $('hiddenmsg').classList.add('hidden');
+    $('show').classList.add('hidden');
+  };
+  $('back').onclick = function () { show('pick'); };
+
+  $('draw').onclick = function () {
+    var raw = $('names').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var seen = {}, names = [], dup = null;
+    raw.forEach(function (n) {
+      var k = n.toLowerCase();
+      if (seen[k]) dup = n; else { seen[k] = 1; names.push(n); }
+    });
+    if (dup) { $('err').textContent = 'Nome duplicato: "' + dup + '". Aggiungi un cognome o un\'iniziale.'; return; }
+    if (names.length < 3) { $('err').textContent = 'Servono almeno 3 nomi.'; return; }
+    $('err').textContent = '';
+    var perm = singleCycle(names.length);
+    var code = enc({ n: names, p: perm });
+    $('link').value = hosted ? base + '#' + code : code;
+    $('sharemsg').textContent = hosted
+      ? 'Manda questo link a tutti: ognuno lo apre, tocca il proprio nome e vede a chi deve fare il regalo.'
+      : 'Questa pagina non ha un indirizzo web (anteprima), quindi ti do solo il codice. Chi lo riceve deve aprire la stessa pagina, incollarlo in "Hai già un codice" e premere Apri.';
+    $('sub').textContent = 'Pronto.';
+    show('share');
+  };
+
+  $('copy').onclick = function () {
+    var el = $('link'); el.select();
+    var done = function () { $('copy').textContent = 'Copiato ✓'; setTimeout(function () { $('copy').textContent = 'Copia link'; }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(el.value).then(done, function () { document.execCommand('copy'); done(); });
+    else { document.execCommand('copy'); done(); }
+  };
+  $('send').onclick = function () {
+    var url = $('link').value;
+    if (navigator.share) navigator.share({ title: 'Secret Santa', text: 'Scopri a chi fai il regalo:', url: url }).catch(function () {});
+    else $('copy').click();
+  };
+  function codeOf(v) { v = v.trim(); var i = v.indexOf('#'); return i >= 0 ? v.slice(i + 1) : v; }
+  $('mine').onclick = function () { location.hash = '#' + codeOf($('link').value); };
+  $('usecode').onclick = function () {
+    var c = codeOf($('code').value);
+    if (!c) return;
+    try { dec(c); } catch (e) { $('err').textContent = 'Codice non valido.'; return; }
+    $('err').textContent = '';
+    location.hash = '#' + c;
+  };
+
+  window.addEventListener('hashchange', route);
+  route();
+})();
+</script>
+</body>
+</html>
