@@ -30,6 +30,10 @@
   input.link { width:100%; padding:10px; border-radius:10px; border:1px solid #2c4535;
                background:#0f1b14; color:var(--fg); font:inherit; font-size:.8rem; }
   .err { color:#ff9a8f; margin-top:8px; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex; align-items:center;
+           justify-content:center; padding:20px; z-index:10; }
+  .modal .box { background:var(--card); border-radius:16px; padding:20px; max-width:420px; width:100%; }
+  .modal h2 { margin:0 0 8px; font-size:1.2rem; }
 </style>
 </head>
 <body>
@@ -93,6 +97,16 @@
     </div>
   </section>
 </main>
+<div id="modal" class="modal hidden">
+  <div class="box">
+    <h2 id="mtitle"></h2>
+    <p id="mtext" style="color:var(--mut)"></p>
+    <div class="row">
+      <button id="mno" class="sec">Annulla</button>
+      <button id="myes">Continua</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (function () {
@@ -152,13 +166,47 @@
     data.n.forEach(function (name, i) {
       var b = document.createElement('button');
       b.className = 'name'; b.textContent = name;
-      b.onclick = function () { openReveal(i); };
+      b.onclick = function () { tryOpen(i); };
       list.appendChild(b);
     });
     show('pick');
   }
 
+  // --- "already opened" guard (per draft, stored on this device)
+  function skey() { return 'ss:' + location.hash.replace(/^#/, '').slice(-24); }
+  var mem = null;
+  function getOpened() {
+    try { var v = localStorage.getItem(skey()); return v === null ? mem : parseInt(v, 10); }
+    catch (e) { return mem; }
+  }
+  function setOpened(i) {
+    mem = i;
+    try { localStorage.setItem(skey(), String(i)); } catch (e) {}
+  }
+  function ask(title, text, yesLabel, onYes) {
+    $('mtitle').textContent = title; $('mtext').textContent = text;
+    $('myes').textContent = yesLabel;
+    $('modal').classList.remove('hidden');
+    $('mno').onclick = function () { $('modal').classList.add('hidden'); };
+    $('myes').onclick = function () { $('modal').classList.add('hidden'); onYes(); };
+  }
+  function tryOpen(i) {
+    var prev = getOpened();
+    if (prev === null || prev === undefined || isNaN(prev) || prev === i) return openReveal(i);
+    ask('Hai già fatto l\'estrazione',
+        'Da questo dispositivo hai già aperto il nome di ' + data.n[prev] + '. Aprirne un altro è sleale e verrà inviata una notifica di avviso agli altri partecipanti.',
+        'Voglio procedere comunque',
+        function () {
+          ask('Sicuro sicuro?',
+              'Ultima conferma: se continui, la notifica parte e tutti sapranno che hai aperto più di un nome.',
+              'Sì, apri ' + data.n[i],
+              function () { openReveal(i); });
+        });
+  }
+
+  var current = null;
   function openReveal(i) {
+    current = i;
     $('hello').innerHTML = '<b></b>';
     $('hello').firstChild.textContent = 'Ciao ' + data.n[i] + '!';
     $('target').textContent = data.n[data.p[i]];
@@ -168,6 +216,7 @@
     show('reveal');
   }
   $('show').onclick = function () {
+    if (current !== null) setOpened(current); // counts as "opened" only once revealed
     $('out').classList.remove('hidden');
     $('hiddenmsg').classList.add('hidden');
     $('show').classList.add('hidden');
