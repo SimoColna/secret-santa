@@ -144,12 +144,16 @@
     return a;
   }
 
-  var base = location.href.split('#')[0];
+  var base = location.href.split('#')[0].split('?')[0];
   var hosted = /^(https?|file):/.test(base);
   var data = null;
 
+  function getCode() {
+    var m = location.search.match(/[?&]d=([^&]+)/);
+    return m ? m[1] : location.hash.replace(/^#/, '');
+  }
   function route() {
-    var h = location.hash.replace(/^#/, '');
+    var h = getCode();
     if (!h) {
       $('sub').textContent = 'Inserisci i nomi e avvia il draft.';
       show('setup');
@@ -173,7 +177,7 @@
   }
 
   // --- "already opened" guard (per draft, stored on this device)
-  function skey() { return 'ss:' + location.hash.replace(/^#/, '').slice(-24); }
+  function skey() { return 'ss:' + getCode().slice(-24); }
   var mem = null;
   function getOpened() {
     try { var v = localStorage.getItem(skey()); return v === null ? mem : parseInt(v, 10); }
@@ -224,7 +228,7 @@
   $('back').onclick = function () { show('pick'); };
 
   $('draw').onclick = function () {
-    var raw = $('names').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var raw = $('names').value.replace(/[\u200B-\u200F\u2060\uFEFF]/g, '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
     var seen = {}, names = [], dup = null;
     raw.forEach(function (n) {
       var k = n.toLowerCase();
@@ -235,7 +239,7 @@
     $('err').textContent = '';
     var perm = singleCycle(names.length);
     var code = enc({ n: names, p: perm });
-    $('link').value = hosted ? base + '#' + code : code;
+    $('link').value = hosted ? base.replace(/\?.*$/, '') + '?d=' + code : code;
     $('sharemsg').textContent = hosted
       ? 'Manda questo link a tutti: ognuno lo apre, tocca il proprio nome e vede a chi deve fare il regalo.'
       : 'Questa pagina non ha un indirizzo web (anteprima), quindi ti do solo il codice. Chi lo riceve deve aprire la stessa pagina, incollarlo in "Hai già un codice" e premere Apri.';
@@ -254,7 +258,12 @@
     if (navigator.share) navigator.share({ title: 'Secret Santa', text: 'Scopri a chi fai il regalo:', url: url }).catch(function () {});
     else $('copy').click();
   };
-  function codeOf(v) { v = v.trim(); var i = v.indexOf('#'); return i >= 0 ? v.slice(i + 1) : v; }
+  function codeOf(v) {
+    v = v.trim();
+    var m = v.match(/[?&]d=([^&#\s]+)/);
+    if (m) return m[1];
+    var i = v.indexOf('#'); return i >= 0 ? v.slice(i + 1) : v;
+  }
   $('mine').onclick = function () { location.hash = '#' + codeOf($('link').value); };
   $('usecode').onclick = function () {
     var c = codeOf($('code').value);
